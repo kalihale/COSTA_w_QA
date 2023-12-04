@@ -2,7 +2,9 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModel, AdamW
 from datasets import load_dataset
+from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
+
 
 def compute_loss(start_logits, end_logits, start_positions, end_positions):
     # Cross-entropy loss for start and end positions
@@ -40,6 +42,9 @@ dataset = load_dataset("squad")
 # Specify the tokenizer and model name
 model_name = "xyma/COSTA-wiki"
 tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+writer = SummaryWriter()
+
 
 # Preprocessing function for tokenization
 def preprocess_function(examples):
@@ -87,8 +92,10 @@ def preprocess_function(examples):
     tokenized_examples["end_positions"] = end_positions
     return tokenized_examples
 
+
 # Tokenize the dataset
 tokenized_datasets = dataset.map(preprocess_function, batched=True, remove_columns=dataset["train"].column_names)
+
 
 # Define a custom collate function for the DataLoader
 def collate_fn(batch):
@@ -98,6 +105,7 @@ def collate_fn(batch):
         'start_positions': torch.stack([torch.tensor(item['start_positions'], dtype=torch.long) for item in batch]),
         'end_positions': torch.stack([torch.tensor(item['end_positions'], dtype=torch.long) for item in batch]),
     }
+
 
 # Create DataLoaders with the custom collate function
 train_loader = DataLoader(tokenized_datasets["train"], batch_size=8, shuffle=True, collate_fn=collate_fn)
@@ -116,6 +124,8 @@ optimizer = AdamW(model.parameters(), lr=5e-5)
 # Training loop
 for epoch in range(3):  # Adjust the number of epochs as needed
     model.train()
+    total_loss = 0
+    i = 0
     for batch in train_loader:
         input_ids = batch['input_ids'].to(device)
         attention_mask = batch['attention_mask'].to(device)
@@ -125,12 +135,16 @@ for epoch in range(3):  # Adjust the number of epochs as needed
         optimizer.zero_grad()
         start_logits, end_logits = model(input_ids, attention_mask)
         loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
+        total_loss += loss
         loss.backward()
         optimizer.step()
+        i += 1
+    avg_loss = total_loss / i
+    # go to http://localhost:6006 to view tensorboard
+    writer.add_scalar("Average loss/train", avg_loss, epoch)
 
-        print(f"Epoch {epoch}, Loss: {loss.item()}")
+# Validation step (if necessary)
 
-    # Validation step (if necessary)
 
 # Save the fine-tuned model
 model.save_pretrained("./costa_finetuned")
