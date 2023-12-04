@@ -116,6 +116,7 @@ model = COSTAForQA(model_name)
 
 # Move model to GPU if available
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 model.to(device)
 
 # Define the optimizer
@@ -139,7 +140,9 @@ for epoch in range(3):  # Adjust the number of epochs as needed
         loss.backward()
         optimizer.step()
         i += 1
+        print(f"Epoch {epoch}, Loss: {loss.item()}")
     avg_loss = total_loss / i
+    # Start tensorboard with `tensorboard --logdir=./runs`
     # go to http://localhost:6006 to view tensorboard
     writer.add_scalar("Average loss/train", avg_loss, epoch)
 
