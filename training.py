@@ -8,7 +8,7 @@ def compute_loss(start_logits, end_logits, start_positions, end_positions):
     # Cross-entropy loss for start and end positions
     start_loss = F.cross_entropy(start_logits, start_positions)
     end_loss = F.cross_entropy(end_logits, end_positions)
-    
+
     # The total loss is the average of the start and end losses
     total_loss = (start_loss + end_loss) / 2
     return total_loss
@@ -28,6 +28,11 @@ class COSTAForQA(torch.nn.Module):
         start_logits = start_logits.squeeze(-1)
         end_logits = end_logits.squeeze(-1)
         return start_logits, end_logits
+
+    def save_pretrained(self, folder):
+        self.costa_encoder.save_pretrained(folder + "/costa_finetuned")
+        torch.save(self.qa_outputs, folder + "/qa_outputs.pt")
+
 
 # Load the dataset
 dataset = load_dataset("squad")
@@ -95,8 +100,8 @@ def collate_fn(batch):
     }
 
 # Create DataLoaders with the custom collate function
-train_loader = DataLoader(tokenized_datasets["train"], batch_size=16, shuffle=True, collate_fn=collate_fn)
-val_loader = DataLoader(tokenized_datasets["validation"], batch_size=16, collate_fn=collate_fn)
+train_loader = DataLoader(tokenized_datasets["train"], batch_size=8, shuffle=True, collate_fn=collate_fn)
+val_loader = DataLoader(tokenized_datasets["validation"], batch_size=8, collate_fn=collate_fn)
 
 # Initialize the COSTA model for QA
 model = COSTAForQA(model_name)
