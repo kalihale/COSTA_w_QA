@@ -31,9 +31,13 @@ class COSTAForQA(torch.nn.Module):
         end_logits = end_logits.squeeze(-1)
         return start_logits, end_logits
 
-    def save_pretrained(self, folder):
-        self.costa_encoder.save_pretrained(folder + "/costa_finetuned")
-        torch.save(self.qa_outputs, folder + "/qa_outputs.pt")
+    def save_pretrained(self, folder, epoch, models):
+        self.costa_encoder.save_pretrained(folder + "/costa_finetuned" + str(epoch) + "_" + str(models))
+        torch.save(self.qa_outputs, folder + "/qa_outputs_" + str(epoch) + "_" + str(models) + ".pt")
+
+    def load_pretrained(self, folder, epoch, models):
+        self.costa_encoder = AutoModel.from_pretrained(folder + "/costa_finetuned" + str(epoch) + "_" + str(models))
+        self.qa_outputs = torch.load(folder + "/qa_outputs_" + str(epoch) + "_" + str(models) + ".pt")
 
 
 # Load the dataset
@@ -119,35 +123,38 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(device)
 model.to(device)
 
-# Define the optimizer
-optimizer = AdamW(model.parameters(), lr=5e-5)
+for models in range(2):
 
-# Training loop
-for epoch in range(3):  # Adjust the number of epochs as needed
-    model.train()
-    total_loss = 0
-    i = 0
-    for batch in train_loader:
-        input_ids = batch['input_ids'].to(device)
-        attention_mask = batch['attention_mask'].to(device)
-        start_positions = batch['start_positions'].to(device)
-        end_positions = batch['end_positions'].to(device)
+    lr = [5e-5, 5e-6]
 
-        optimizer.zero_grad()
-        start_logits, end_logits = model(input_ids, attention_mask)
-        loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
-        total_loss += loss
-        loss.backward()
-        optimizer.step()
-        i += 1
-        print(f"Epoch {epoch}, Loss: {loss.item()}")
-    avg_loss = total_loss / i
-    # Start tensorboard with `tensorboard --logdir=./runs`
-    # go to http://localhost:6006 to view tensorboard
-    writer.add_scalar("Average loss/train", avg_loss, epoch)
+    print(lr[models])
 
-# Validation step (if necessary)
+    # Define the optimizer
+    optimizer = AdamW(model.parameters(), lr=lr[models])
 
+    # Training loop
+    for epoch in range(4):  # Adjust the number of epochs as needed
+        model.train()
+        total_loss = 0
+        i = 0
+        for batch in train_loader:
+            input_ids = batch['input_ids'].to(device)
+            attention_mask = batch['attention_mask'].to(device)
+            start_positions = batch['start_positions'].to(device)
+            end_positions = batch['end_positions'].to(device)
 
-# Save the fine-tuned model
-model.save_pretrained("./costa_finetuned")
+            optimizer.zero_grad()
+            start_logits, end_logits = model(input_ids, attention_mask)
+            loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
+            total_loss += loss
+            loss.backward()
+            optimizer.step()
+            i += 1
+            print(f"Epoch {epoch}, Loss: {loss.item()}")
+        avg_loss = total_loss / i
+        # Start tensorboard with `tensorboard --logdir=./runs`
+        # go to http://localhost:6006 to view tensorboard
+        writer.add_scalar(("Average loss/train" + str(models)), avg_loss, epoch)
+        if 1 <= epoch <= 3:
+            # Save the fine-tuned model
+            model.save_pretrained("./costa_finetuned_squad", epoch, models)

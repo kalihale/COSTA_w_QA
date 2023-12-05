@@ -117,7 +117,7 @@ model.to(device)
 optimizer = AdamW(model.parameters(), lr=5e-5)
 
 # Training loop
-for epoch in range(1):  # Adjust the number of epochs as needed
+for epoch in range(0):  # Adjust the number of epochs as needed
     model.train()
     for batch in train_loader:
         input_ids = batch['input_ids'].to(device)
