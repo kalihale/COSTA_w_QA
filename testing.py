@@ -67,15 +67,32 @@ def collate_fn(batch):
     }
 
 
-# def predict_answers_and_evaluate(start_logits, end_logits, eval_set, examples):
-#     examples_to_features = collections.defaultdict(list)
-#     for idx, feature in enumerate(eval_set):
-#         examples_to_features[feature["id"]].append(idx)
-#
-#     n_best =
-#     _, predicted_start = torch.max(start_logits, 1)
-#     _, predicted_end = torch.max(end_logits, 1)
-#     answer = tokenizer.convert_tokens_to_string(tokenizer.convert_ids_to_tokens())
+def compute_f1(start_logits, end_logits, start_positions, end_positions):
+    f1_sum = 0
+    for i in range(len(start_logits)):
+        if start_logits[i] == end_logits[i]:
+            if start_positions[i] == end_positions[i]:
+                f1 = 1
+            else:
+                f1 = 0
+        elif start_logits[i] > end_positions[i] or start_positions[i] > end_logits[i]:
+            f1 = 0
+        else:
+            if start_logits[i] < start_positions[i]:
+                if end_logits[i] < end_positions[i]:
+                    shared = end_logits[i] - start_positions[i]
+                else:
+                    shared = end_positions[i] - start_positions[i]
+            else:
+                if end_logits[i] < end_positions[i]:
+                    shared = end_logits[i] - start_logits[i]
+                else:
+                    shared = end_positions[i] - start_logits[i]
+            precision = shared / (end_logits[i] - start_logits[i])
+            recall = shared / (end_positions[i] - start_positions[i])
+            f1 = (2 * precision * recall) / (precision + recall)
+        f1_sum += f1
+    return f1_sum, len(start_logits)
 
 
 def exact_match(start_logits, end_logits, start_positions, end_positions):
@@ -84,7 +101,6 @@ def exact_match(start_logits, end_logits, start_positions, end_positions):
         if start_logits[i] == start_positions[i] and end_logits[i] == end_positions[i]:
             score += 1
     return score, len(start_logits)
-
 
 
 if __name__ == "__main__":
@@ -113,6 +129,7 @@ if __name__ == "__main__":
             model.eval()
             total_correct = 0
             total_val = 0
+            f1_total_sum = 0
             with torch.no_grad():
                 for b in range(len(val_loader)):
                     batch = next(iter(val_loader))
@@ -126,5 +143,7 @@ if __name__ == "__main__":
                     _, predicted_end = torch.max(end_logits, 1)
                     correct, batch_size = exact_match(predicted_start, predicted_end, start_positions, end_positions)
                     total_correct += correct
+                    f1_batch, batch_size = compute_f1(predicted_start, predicted_end, start_positions, end_positions)
+                    f1_total_sum += f1_batch
                     total_val += batch_size
-            print("model_", epoch, "_", models, " ", total_correct, " / ", total_val)
+            print("model_", epoch, "_", models, " exact match: ", total_correct/total_val, " f1 score: ", f1_total_sum/total_val)
