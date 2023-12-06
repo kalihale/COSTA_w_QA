@@ -5,17 +5,6 @@ from datasets import load_dataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
 
-
-def compute_loss(start_logits, end_logits, start_positions, end_positions):
-    # Cross-entropy loss for start and end positions
-    start_loss = F.cross_entropy(start_logits, start_positions)
-    end_loss = F.cross_entropy(end_logits, end_positions)
-
-    # The total loss is the average of the start and end losses
-    total_loss = (start_loss + end_loss) / 2
-    return total_loss
-
-
 # Custom COSTA Model for Question Answering
 class COSTAForQA(torch.nn.Module):
     def __init__(self, model_name):
@@ -40,14 +29,14 @@ class COSTAForQA(torch.nn.Module):
         self.qa_outputs = torch.load(folder + "/qa_outputs_" + str(epoch) + "_" + str(models) + ".pt")
 
 
-# Load the dataset
-dataset = load_dataset("squad")
+def compute_loss(start_logits, end_logits, start_positions, end_positions):
+    # Cross-entropy loss for start and end positions
+    start_loss = F.cross_entropy(start_logits, start_positions)
+    end_loss = F.cross_entropy(end_logits, end_positions)
 
-# Specify the tokenizer and model name
-model_name = "xyma/COSTA-wiki"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-
-writer = SummaryWriter()
+    # The total loss is the average of the start and end losses
+    total_loss = (start_loss + end_loss) / 2
+    return total_loss
 
 
 # Preprocessing function for tokenization
@@ -97,10 +86,6 @@ def preprocess_function(examples):
     return tokenized_examples
 
 
-# Tokenize the dataset
-tokenized_datasets = dataset.map(preprocess_function, batched=True, remove_columns=dataset["train"].column_names)
-
-
 # Define a custom collate function for the DataLoader
 def collate_fn(batch):
     return {
@@ -111,50 +96,63 @@ def collate_fn(batch):
     }
 
 
-# Create DataLoaders with the custom collate function
-train_loader = DataLoader(tokenized_datasets["train"], batch_size=8, shuffle=True, collate_fn=collate_fn)
-val_loader = DataLoader(tokenized_datasets["validation"], batch_size=8, collate_fn=collate_fn)
+if __name__ == "__main__":
+    # Load the dataset
+    dataset = load_dataset("squad")
 
-# Initialize the COSTA model for QA
-model = COSTAForQA(model_name)
+    # Specify the tokenizer and model name
+    model_name = "xyma/COSTA-wiki"
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-# Move model to GPU if available
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-print(device)
-model.to(device)
+    writer = SummaryWriter()
 
-for models in range(2):
+    # Tokenize the dataset
+    tokenized_datasets = dataset.map(preprocess_function, batched=True, remove_columns=dataset["train"].column_names)
 
-    lr = [5e-5, 5e-6]
+    # Create DataLoaders with the custom collate function
+    train_loader = DataLoader(tokenized_datasets["train"], batch_size=8, shuffle=True, collate_fn=collate_fn)
+    val_loader = DataLoader(tokenized_datasets["validation"], batch_size=8, collate_fn=collate_fn)
 
-    print(lr[models])
+    # Initialize the COSTA model for QA
+    model = COSTAForQA(model_name)
 
-    # Define the optimizer
-    optimizer = AdamW(model.parameters(), lr=lr[models])
+    # Move model to GPU if available
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(device)
+    model.to(device)
 
-    # Training loop
-    for epoch in range(4):  # Adjust the number of epochs as needed
-        model.train()
-        total_loss = 0
-        i = 0
-        for batch in train_loader:
-            input_ids = batch['input_ids'].to(device)
-            attention_mask = batch['attention_mask'].to(device)
-            start_positions = batch['start_positions'].to(device)
-            end_positions = batch['end_positions'].to(device)
+    for models in range(2):
 
-            optimizer.zero_grad()
-            start_logits, end_logits = model(input_ids, attention_mask)
-            loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
-            total_loss += loss
-            loss.backward()
-            optimizer.step()
-            i += 1
-            print(f"Epoch {epoch}, Loss: {loss.item()}")
-        avg_loss = total_loss / i
-        # Start tensorboard with `tensorboard --logdir=./runs`
-        # go to http://localhost:6006 to view tensorboard
-        writer.add_scalar(("Average loss/train" + str(models)), avg_loss, epoch)
-        if 1 <= epoch <= 3:
-            # Save the fine-tuned model
-            model.save_pretrained("./costa_finetuned_squad", epoch, models)
+        lr = [5e-5, 5e-6]
+
+        print(lr[models])
+
+        # Define the optimizer
+        optimizer = AdamW(model.parameters(), lr=lr[models])
+
+        # Training loop
+        for epoch in range(4):  # Adjust the number of epochs as needed
+            model.train()
+            total_loss = 0
+            i = 0
+            for batch in train_loader:
+                input_ids = batch['input_ids'].to(device)
+                attention_mask = batch['attention_mask'].to(device)
+                start_positions = batch['start_positions'].to(device)
+                end_positions = batch['end_positions'].to(device)
+
+                optimizer.zero_grad()
+                start_logits, end_logits = model(input_ids, attention_mask)
+                loss = compute_loss(start_logits, end_logits, start_positions, end_positions)
+                total_loss += loss
+                loss.backward()
+                optimizer.step()
+                i += 1
+                print(f"Epoch {epoch}, Loss: {loss.item()}")
+            avg_loss = total_loss / i
+            # Start tensorboard with `tensorboard --logdir=./runs`
+            # go to http://localhost:6006 to view tensorboard
+            writer.add_scalar(("Average loss/train" + str(models)), avg_loss, epoch)
+            if 1 <= epoch <= 3:
+                # Save the fine-tuned model
+                model.save_pretrained("./costa_finetuned_squad", epoch, models)
