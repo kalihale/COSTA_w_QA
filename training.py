@@ -1,9 +1,12 @@
+import argparse
+
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer, AutoModel, AdamW
 from datasets import load_dataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.nn.functional as F
+
 
 # Custom COSTA Model for Question Answering
 class COSTAForQA(torch.nn.Module):
@@ -20,13 +23,19 @@ class COSTAForQA(torch.nn.Module):
         end_logits = end_logits.squeeze(-1)
         return start_logits, end_logits
 
-    def save_pretrained(self, folder, epoch, models):
-        self.costa_encoder.save_pretrained(folder + "/costa_finetuned" + str(epoch) + "_" + str(models))
-        torch.save(self.qa_outputs, folder + "/qa_outputs_" + str(epoch) + "_" + str(models) + ".pt")
+    def save_pretrained(self, folder, epoch, lr):
+        self.costa_encoder.save_pretrained(folder + "/costa_finetuned_lr" + str(lr) + "_epoch" + str(epoch))
+        torch.save(self.qa_outputs, folder + "/qa_outputs_lr" + str(lr) + "_epoch" + str(epoch) + ".pt")
 
-    def load_pretrained(self, folder, epoch, models):
-        self.costa_encoder = AutoModel.from_pretrained(folder + "/costa_finetuned" + str(epoch) + "_" + str(models))
-        self.qa_outputs = torch.load(folder + "/qa_outputs_" + str(epoch) + "_" + str(models) + ".pt")
+    def load_pretrained(self, folder, epoch, lr):
+        encoder = AutoModel.from_pretrained(folder + "/costa_finetuned_lr" + str(lr) + "_epoch" + str(epoch))
+        qa = torch.load(folder + "/qa_outputs_lr" + str(lr) + "_epoch" + str(epoch) + ".pt")
+        if encoder is not None and qa is not None:
+            self.costa_encoder = encoder
+            self.qa_outputs = qa
+            return True
+        else:
+            return False
 
 
 def compute_loss(start_logits, end_logits, start_positions, end_positions):
@@ -97,6 +106,15 @@ def collate_fn(batch):
 
 
 if __name__ == "__main__":
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(description="Process an array with a flag.")
+    parser.add_argument('-lr', '--learningrates', nargs='+', type=float,
+                        help='Array of floats, the learning rates to be tested.')
+    parser.add_argument('-e', '--epochs', type=int, help='A single int argument, the number of epochs.')
+    args = parser.parse_args()
+    lr = args.learningrates
+    epochs = args.epochs
+
     # Load the dataset
     dataset = load_dataset("squad")
 
@@ -104,6 +122,7 @@ if __name__ == "__main__":
     model_name = "xyma/COSTA-wiki"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
+    # Instantiate SummaryWriter to get stats of models
     writer = SummaryWriter()
 
     # Tokenize the dataset
@@ -121,17 +140,13 @@ if __name__ == "__main__":
     print(device)
     model.to(device)
 
-    for models in range(2):
-
-        lr = [5e-5, 5e-6]
-
-        print(lr[models])
-
+    # Repeat for each learning rate in the list
+    for rate in lr:
+        print(rate)
         # Define the optimizer
-        optimizer = AdamW(model.parameters(), lr=lr[models])
-
-        # Training loop
-        for epoch in range(4):  # Adjust the number of epochs as needed
+        optimizer = AdamW(model.parameters(), lr=rate)
+        # Training loop - Repeat for number of epochs
+        for epoch in range(epochs):
             model.train()
             total_loss = 0
             i = 0
@@ -150,9 +165,9 @@ if __name__ == "__main__":
                 i += 1
                 print(f"Epoch {epoch}, Loss: {loss.item()}")
             avg_loss = total_loss / i
+            # Add stats to file
             # Start tensorboard with `tensorboard --logdir=./runs`
             # go to http://localhost:6006 to view tensorboard
-            writer.add_scalar(("Average loss/train" + str(models)), avg_loss, epoch)
-            if 1 <= epoch <= 3:
-                # Save the fine-tuned model
-                model.save_pretrained("./costa_finetuned_squad", epoch, models)
+            writer.add_scalar(("Average loss/train" + str(rate)), avg_loss, epoch)
+            # Save the fine-tuned model
+            model.save_pretrained("./costa_finetuned_squad", epoch, rate)

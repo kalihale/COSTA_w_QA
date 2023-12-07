@@ -1,13 +1,11 @@
-import collections
+import argparse
 
 import torch
-from torch.utils.data import DataLoader
-from transformers import AutoTokenizer, AutoModel, AdamW
 from datasets import load_dataset
-from torch.utils.tensorboard import SummaryWriter
-import torch.nn.functional as F
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
+
 from training import COSTAForQA
-import evaluate
 
 
 # Preprocessing function for tokenization
@@ -104,46 +102,65 @@ def exact_match(start_logits, end_logits, start_positions, end_positions):
 
 
 if __name__ == "__main__":
+    # Get command-line arguments
+    parser = argparse.ArgumentParser(description="Process an array with a flag.")
+    parser.add_argument('-lr', '--learningrates', nargs='+', type=float,
+                        help='Array of floats, the learning rates to be tested.')
+    parser.add_argument('-e', '--epochs', type=int, help='A single int argument, the number of epochs.')
+    args = parser.parse_args()
+    lr = args.learningrates
+    epochs = args.epochs
+
+    # Load the dataset
     dataset = load_dataset("squad")
 
+    # Load a plaintext version of the dataset
     dataset_v = DataLoader(dataset["validation"], batch_size=8)
 
+    # Load the COSTA model
     model_name = "xyma/COSTA-wiki"
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = COSTAForQA(model_name)
 
     # Tokenize the dataset
-    tokenized_datasets = dataset.map(preprocess_function, batched=True, remove_columns=dataset["validation"].column_names)
+    tokenized_datasets = dataset.map(preprocess_function, batched=True,
+                                     remove_columns=dataset["validation"].column_names)
 
     # Create DataLoaders with the custom collate function
     train_loader = DataLoader(tokenized_datasets["train"], batch_size=8, shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(tokenized_datasets["validation"], batch_size=8, collate_fn=collate_fn)
 
-    for models in range(2):
-        for epoch in range(1, 4):  # Adjust the number of epochs as needed
-            model.load_pretrained("./costa_finetuned_squad", epoch, models)
-            # Move model to GPU if available
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            print(device)
-            model.to(device)
-            model.eval()
-            total_correct = 0
-            total_val = 0
-            f1_total_sum = 0
-            with torch.no_grad():
-                for b in range(len(val_loader)):
-                    batch = next(iter(val_loader))
-                    v_batch = next(iter(dataset_v))
-                    input_ids = batch['input_ids'].to(device)
-                    attention_mask = batch['attention_mask'].to(device)
-                    start_positions = batch['start_positions'].to(device)
-                    end_positions = batch['end_positions'].to(device)
-                    start_logits, end_logits = model(input_ids, attention_mask)
-                    _, predicted_start = torch.max(start_logits, 1)
-                    _, predicted_end = torch.max(end_logits, 1)
-                    correct, batch_size = exact_match(predicted_start, predicted_end, start_positions, end_positions)
-                    total_correct += correct
-                    f1_batch, batch_size = compute_f1(predicted_start, predicted_end, start_positions, end_positions)
-                    f1_total_sum += f1_batch
-                    total_val += batch_size
-            print("model_", epoch, "_", models, " exact match: ", total_correct/total_val, " f1 score: ", f1_total_sum/total_val)
+    # Repeat for all learning rates from the CL
+    for rate in lr:
+        # Repeat for the number of epochs
+        for epoch in range(epochs):
+            try:
+                model.load_pretrained("./costa_finetuned_squad_2", epoch, rate)
+                # Move model to GPU if available
+                device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+                print(device)
+                model.to(device)
+                model.eval()
+                total_correct = 0
+                total_val = 0
+                f1_total_sum = 0
+                with torch.no_grad():
+                    for b in range(len(val_loader)):
+                        batch = next(iter(val_loader))
+                        v_batch = next(iter(dataset_v))
+                        input_ids = batch['input_ids'].to(device)
+                        attention_mask = batch['attention_mask'].to(device)
+                        start_positions = batch['start_positions'].to(device)
+                        end_positions = batch['end_positions'].to(device)
+                        start_logits, end_logits = model(input_ids, attention_mask)
+                        _, predicted_start = torch.max(start_logits, 1)
+                        _, predicted_end = torch.max(end_logits, 1)
+                        correct, batch_size = exact_match(predicted_start, predicted_end, start_positions, end_positions)
+                        total_correct += correct
+                        f1_batch, batch_size = compute_f1(predicted_start, predicted_end, start_positions, end_positions)
+                        f1_total_sum += f1_batch
+                        total_val += batch_size
+                print("model_lr", rate, "_epoch", epoch, " exact match: ", total_correct / total_val, " f1 score: ",
+                      f1_total_sum / total_val)
+            except:
+                continue
