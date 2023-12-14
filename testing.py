@@ -65,32 +65,32 @@ def collate_fn(batch):
     }
 
 
-def compute_f1(start_logits, end_logits, start_positions, end_positions):
+def compute_f1(pred_start, pred_end, gt_start, gt_end):
     f1_sum = 0
-    for i in range(len(start_logits)):
-        if start_logits[i] == end_logits[i]:
-            if start_positions[i] == end_positions[i]:
+    for i in range(len(pred_start)):
+        if pred_start[i] == pred_end[i]:
+            if gt_start[i] == gt_end[i]:
                 f1 = 1
             else:
                 f1 = 0
-        elif start_logits[i] > end_positions[i] or start_positions[i] > end_logits[i]:
+        elif pred_start[i] > gt_end[i] or gt_start[i] > pred_end[i]:
             f1 = 0
         else:
-            if start_logits[i] < start_positions[i]:
-                if end_logits[i] < end_positions[i]:
-                    shared = end_logits[i] - start_positions[i]
+            if pred_start[i] < gt_start[i]:
+                if pred_end[i] < gt_end[i]:
+                    shared = pred_end[i] - gt_start[i]
                 else:
-                    shared = end_positions[i] - start_positions[i]
+                    shared = gt_end[i] - gt_start[i]
             else:
-                if end_logits[i] < end_positions[i]:
-                    shared = end_logits[i] - start_logits[i]
+                if pred_end[i] < gt_end[i]:
+                    shared = pred_end[i] - pred_start[i]
                 else:
-                    shared = end_positions[i] - start_logits[i]
-            precision = shared / (end_logits[i] - start_logits[i])
-            recall = shared / (end_positions[i] - start_positions[i])
+                    shared = gt_end[i] - pred_start[i]
+            precision = shared / (pred_end[i] - pred_start[i])
+            recall = shared / (gt_end[i] - gt_start[i])
             f1 = (2 * precision * recall) / (precision + recall)
         f1_sum += f1
-    return f1_sum, len(start_logits)
+    return f1_sum, len(pred_start)
 
 
 def exact_match(start_logits, end_logits, start_positions, end_positions):
